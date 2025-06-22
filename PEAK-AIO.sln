@@ -1,0 +1,25 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.11.35312.102
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "PEAK-AIO", "PEAK-AIO\PEAK-AIO.csproj", "{0E070E16-C355-4DB0-804C-0510A5AA436E}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{0E070E16-C355-4DB0-804C-0510A5AA436E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{0E070E16-C355-4DB0-804C-0510A5AA436E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{0E070E16-C355-4DB0-804C-0510A5AA436E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{0E070E16-C355-4DB0-804C-0510A5AA436E}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {6905D761-EB8E-4274-94D2-D3507D3F26B1}
+	EndGlobalSection
+EndGlobal
