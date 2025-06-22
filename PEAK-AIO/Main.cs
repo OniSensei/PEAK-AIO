@@ -13,7 +13,7 @@ using Photon.Pun;
 using System.Collections.Generic;
 
 [BepInDependency(DearImGuiInjection.Metadata.GUID)]
-[BepInPlugin("com.onigremlin.peakaio", "PEAK AIO Mod", "1.0.0")]
+[BepInPlugin("com.onigremlin.peakaio", "PEAK AIO Mod", "1.0.1")]
 
 public class PeakMod : BaseUnityPlugin
 {
@@ -43,6 +43,7 @@ public class PeakMod : BaseUnityPlugin
         colors[(int)ImGuiCol.TitleBg] = lightGreen;
         colors[(int)ImGuiCol.TitleBgActive] = lightGreen;
         colors[(int)ImGuiCol.Text] = logInk;
+        colors[(int)ImGuiCol.TextDisabled] = ropeBrown;
         colors[(int)ImGuiCol.CheckMark] = sidebarGreen;
         colors[(int)ImGuiCol.FrameBg] = trailDust;
         colors[(int)ImGuiCol.FrameBgHovered] = trailDustHover;
@@ -96,11 +97,17 @@ public class PeakMod : BaseUnityPlugin
         style.FrameBorderSize = 1.0f;
         style.ItemSpacing = new System.Numerics.Vector2(2, 4);
     }
+    private void Awake()
+    {
+        Logger.LogInfo("Mod Initialized");
+        this.gameObject.AddComponent<EventComponent>();
+    }
 
     private void OnEnable()
     {
         Logger.LogInfo("[PEAK AIO] OnEnable called");
 
+        Globals.itemSearchBuffers = new string[3] { "", "", "" };
         ConfigManager.Init(Config, Logger);
         DearImGuiInjection.DearImGuiInjection.Render += MyUI;
 
@@ -116,14 +123,18 @@ public class PeakMod : BaseUnityPlugin
         DearImGuiInjection.DearImGuiInjection.Render -= MyUI;
     }
 
-    void DrawCheckbox(ConfigEntry<bool> config, string label, Action<bool> onChanged = null)
+    void DrawCheckbox(ConfigEntry<bool> config, string label, Action<bool> mainThreadAction = null)
     {
         bool value = config.Value;
         if (ImGui.Checkbox(label, ref value))
         {
             config.Value = value;
-            onChanged?.Invoke(value);
             Logger.LogInfo($"[Menu] {label} toggled to {(value ? "ON" : "OFF")}");
+
+            if (mainThreadAction != null)
+            {
+                UnityMainThreadDispatcher.Enqueue(() => mainThreadAction.Invoke(value));
+            }
         }
     }
 
@@ -134,376 +145,610 @@ public class PeakMod : BaseUnityPlugin
             config.Value = value;
     }
 
-    private void Update()
+    bool DrawSearchableCombo(string label, ref int selectedIndex, List<string> items, ref string searchBuffer)
     {
-        Utilities.UpdateAfflictions();
-        Utilities.UpdateStamina();
-        Utilities.UpdateCharacterSpeed();
-        Utilities.UpdateCharacterJump();
-        Utilities.UpdateCharacterClimb();
-        Utilities.UpdateVineClimb();
-        Utilities.UpdateRopeClimb();
-        Utilities.UpdateItems();
+        bool changed = false;
+
+        // Draw input field
+        string inputId = $"Search##{label}";
+        ImGui.PushItemWidth(ImGui.GetContentRegionAvail().X - 4);
+        ImGui.InputText("##" + inputId, ref searchBuffer, 100);
+        ImGui.PopItemWidth();
+
+        // Draw custom placeholder if input is empty and not active
+        if (string.IsNullOrEmpty(searchBuffer) && !ImGui.IsItemActive())
+        {
+            var pos = ImGui.GetItemRectMin();
+            ImGui.SameLine();
+            ImGui.SetCursorScreenPos(pos + new System.Numerics.Vector2(4, 2));
+            ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.18f, 0.18f, 0.18f, 1.00f)); 
+            ImGui.TextUnformatted("Search items...");
+            ImGui.PopStyleColor();
+        }
+
+        if (ImGui.BeginCombo(label, selectedIndex >= 0 && selectedIndex < items.Count ? items[selectedIndex] : "None"))
+        {
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (!string.IsNullOrEmpty(searchBuffer) &&
+                    !items[i].ToLower().Contains(searchBuffer.ToLower()))
+                    continue;
+
+                bool isSelected = (selectedIndex == i);
+                if (ImGui.Selectable($"{items[i]}##{i}", isSelected))
+                {
+                    selectedIndex = i;
+                    changed = true;
+                }
+
+                if (isSelected)
+                    ImGui.SetItemDefaultFocus();
+            }
+            ImGui.EndCombo();
+        }
+
+        return changed;
+    }
+
+    void DrawToolTip(string text)
+    {
+        ImGui.SameLine();
+        ImGui.TextDisabled("(?)");
+
+        if (ImGui.IsItemHovered())
+        {
+            ImGui.PushStyleColor(ImGuiCol.PopupBg, new System.Numerics.Vector4(0.89f, 0.82f, 0.70f, 1.0f));
+            ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.18f, 0.18f, 0.18f, 1.00f));
+            ImGui.PushStyleVar(ImGuiStyleVar.WindowBorderSize, 1.0f);
+
+            ImGui.BeginTooltip();
+            ImGui.PushTextWrapPos(450.0f);
+            ImGui.TextUnformatted(text);
+            ImGui.PopTextWrapPos();
+            ImGui.EndTooltip();
+
+            ImGui.PopStyleVar();
+            ImGui.PopStyleColor(2);
+        }
     }
 
     private void MyUI()
     {
-        // Only draw the menu when the ImGui cursor is visible (toggled with Insert)
-        if (!DearImGuiInjection.DearImGuiInjection.IsCursorVisible)
-            return;
-
-        if (!styleApplied)
+        try
         {
-            ApplyCustomStyle();
-            styleApplied = true;
-        }
+            // Only draw the menu when the ImGui cursor is visible (toggled with Insert)
+            if (!DearImGuiInjection.DearImGuiInjection.IsCursorVisible)
+                return;
 
-        // Set window position and size
-        ImGui.SetNextWindowPos(new System.Numerics.Vector2(20, 20), ImGuiCond.Once);
-        ImGui.SetNextWindowSize(new System.Numerics.Vector2(500, 300), ImGuiCond.Once);
-
-        if (ImGui.Begin("PEAK AIO##Main", ImGuiWindowFlags.NoCollapse))
-        {
-            // Sidebar
-            ImGui.BeginChild("Sidebar", new System.Numerics.Vector2(85, 0), true);
-            ImGui.Dummy(new System.Numerics.Vector2(4, 2));
-            string[] sidebarItems = { "PLAYER", "ITEMS", "LOBBY", "ABOUT" };
-            for (int i = 0; i < sidebarItems.Length; i++)
+            if (!styleApplied)
             {
-                bool isSelected = (selectedTab == i + 1);
-                string label = sidebarItems[i];
-
-                var textColor = isSelected
-                    ? new System.Numerics.Vector4(0.318f, 0.569f, 0.384f, 1.0f)
-                    : new System.Numerics.Vector4(0.18f, 0.18f, 0.18f, 1.00f);
-
-                ImGui.PushStyleColor(ImGuiCol.Text, textColor);
-
-                float textWidth = ImGui.CalcTextSize(label).X;
-                float availableWidth = ImGui.GetContentRegionAvail().X;
-                float offsetX = (availableWidth - textWidth) * 0.5f;
-                ImGui.SetCursorPosX(offsetX);
-
-                if (ImGui.Selectable(label, isSelected))
-                    selectedTab = i + 1;
-
-                ImGui.PopStyleColor();
+                ApplyCustomStyle();
+                styleApplied = true;
             }
 
-            ImGui.EndChild();
+            // Set window position and size
+            ImGui.SetNextWindowPos(new System.Numerics.Vector2(20, 20), ImGuiCond.Once);
+            ImGui.SetNextWindowSize(new System.Numerics.Vector2(500, 300), ImGuiCond.Once);
 
-            // Main content area
-            ImGui.SameLine();
-            ImGui.BeginChild("MainArea");
-
-            // Player
-            if (selectedTab == 1)
+            if (ImGui.Begin("PEAK AIO##Main", ImGuiWindowFlags.NoCollapse))
             {
-                float fullWidth = ImGui.GetContentRegionAvail().X;
-                float halfWidth = fullWidth / 2f;
-
-                ImGui.BeginChild("PlayerColumn", new System.Numerics.Vector2(halfWidth, 0), true);
-                ImGui.Indent(4.0f);
-                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                // Sidebar
+                ImGui.BeginChild("Sidebar", new System.Numerics.Vector2(85, 0), true);
                 ImGui.Dummy(new System.Numerics.Vector2(4, 2));
-                if (ImGui.CollapsingHeader("Self Mods##SelfMods", ImGuiTreeNodeFlags.DefaultOpen))
+                string[] sidebarItems = { "PLAYER", "ITEMS", "LOBBY", "WORLD", "ABOUT" };
+                for (int i = 0; i < sidebarItems.Length; i++)
                 {
-                    DrawCheckbox(ConfigManager.InfiniteStamina, "Infinite Stamina");
-                    DrawCheckbox(ConfigManager.SpeedMod, "Change Speed");
-                    DrawCheckbox(ConfigManager.JumpMod, "Change Jump");
-                    DrawCheckbox(ConfigManager.ClimbMod, "Change Climb");
-                    DrawCheckbox(ConfigManager.VineClimbMod, "Change Vine Climb");
-                    DrawCheckbox(ConfigManager.RopeClimbMod, "Change Rope Climb");
-                    DrawCheckbox(ConfigManager.TeleportToPing, "Teleport to Ping");
-                    DrawCheckbox(ConfigManager.FlyMod, "Fly Mode", FlyPatch.SetFlying);
-                }
-                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                if (ImGui.CollapsingHeader("Afflictions##PlayerAfflictions", ImGuiTreeNodeFlags.DefaultOpen))
-                {
-                    DrawCheckbox(ConfigManager.NoCold, "No Cold");
-                    DrawCheckbox(ConfigManager.NoCurse, "No Curse");
-                    DrawCheckbox(ConfigManager.NoDrowsy, "No Drowsy");
-                    DrawCheckbox(ConfigManager.NoHot, "No Hot");
-                    DrawCheckbox(ConfigManager.NoHunger, "No Hunger");
-                    DrawCheckbox(ConfigManager.NoInjury, "No Injury");
-                    DrawCheckbox(ConfigManager.NoPoison, "No Poison");
-                    DrawCheckbox(ConfigManager.NoWeight, "No Item Weight");
-                }
-                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                if (ImGui.CollapsingHeader("Teleport##PlayerTeleport", ImGuiTreeNodeFlags.DefaultOpen))
-                {
-                    ImGui.InputFloat("X", ref Globals.teleportX);
-                    ImGui.InputFloat("Y", ref Globals.teleportY);
-                    ImGui.InputFloat("Z", ref Globals.teleportZ);
+                    bool isSelected = (selectedTab == i + 1);
+                    string label = sidebarItems[i];
 
-                    if (ImGui.Button("Teleport to coords"))
-                    {
-                        Logger.LogInfo($"[Teleport] Requested to X:{Globals.teleportX} Y:{Globals.teleportY} Z:{Globals.teleportZ}");
-                        Utilities.TeleportToCoords(Globals.teleportX, Globals.teleportY, Globals.teleportZ);
-                    }
+                    var textColor = isSelected
+                        ? new System.Numerics.Vector4(0.318f, 0.569f, 0.384f, 1.0f)
+                        : new System.Numerics.Vector4(0.18f, 0.18f, 0.18f, 1.00f);
+
+                    ImGui.PushStyleColor(ImGuiCol.Text, textColor);
+
+                    float textWidth = ImGui.CalcTextSize(label).X;
+                    float availableWidth = ImGui.GetContentRegionAvail().X;
+                    float offsetX = (availableWidth - textWidth) * 0.5f;
+                    ImGui.SetCursorPosX(offsetX);
+
+                    if (ImGui.Selectable(label, isSelected))
+                        selectedTab = i + 1;
+
+                    ImGui.PopStyleColor();
                 }
+
                 ImGui.EndChild();
-                ImGui.Unindent();
+
+                // Main content area
                 ImGui.SameLine();
-                ImGui.BeginChild("PlayerDetailsColumn", new System.Numerics.Vector2(halfWidth - 10, 0), true);
-                ImGui.Indent(4.0f);
-                ImGui.Dummy(new System.Numerics.Vector2(4, 2));
-                if (ImGui.CollapsingHeader("Details", ImGuiTreeNodeFlags.DefaultOpen))
+                ImGui.BeginChild("MainArea");
+
+                // Player
+                if (selectedTab == 1)
                 {
-                    if (ConfigManager.InfiniteStamina.Value)
+                    float fullWidth = ImGui.GetContentRegionAvail().X;
+                    float halfWidth = fullWidth / 2f;
+
+                    ImGui.BeginChild("PlayerColumn", new System.Numerics.Vector2(halfWidth, 0), true);
+                    ImGui.Indent(4.0f);
+                    ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                    ImGui.Dummy(new System.Numerics.Vector2(4, 2));
+                    if (ImGui.CollapsingHeader("Self Mods##SelfMods", ImGuiTreeNodeFlags.DefaultOpen))
                     {
-                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                        DrawSliderFloat(ConfigManager.StaminaAmount, "##stam_amt", 0.0f, 1.0f, "Stamina: %.2f");
-                    }
-
-                    if (ConfigManager.SpeedMod.Value)
-                    {
-                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                        DrawSliderFloat(ConfigManager.SpeedAmount, "##speed_amt", 1.0f, 20.0f, "Move Speed: %.2f");
-                    }
-
-                    if (ConfigManager.JumpMod.Value)
-                    {
-                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                        DrawSliderFloat(ConfigManager.JumpAmount, "##jump_amt", 10.0f, 500.0f, "Jump Mult: %.2f");
-                        DrawCheckbox(ConfigManager.NoFallDmg, "No Fall Dmg");
-                    }
-
-                    if (ConfigManager.ClimbMod.Value)
-                    {
-                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                        DrawSliderFloat(ConfigManager.ClimbAmount, "##climb_amt", 1.0f, 20.0f, "Climb Speed: %.2f");
-                    }
-
-                    if (ConfigManager.VineClimbMod.Value)
-                    {
-                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                        DrawSliderFloat(ConfigManager.VineClimbAmount, "##vine_climb_amt", 1.0f, 20.0f, "Vine Speed: %.2f");
-                    }
-
-                    if (ConfigManager.RopeClimbMod.Value)
-                    {
-                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                        DrawSliderFloat(ConfigManager.RopeClimbAmount, "##rope_climb_amt", 1.0f, 20.0f, "Rope Speed: %.2f");
-                    }
-                    if (ConfigManager.FlyMod.Value)
-                    {
-                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                        DrawSliderFloat(ConfigManager.FlySpeed, "##fly_speed", 10f, 100f, "Fly Speed: %.2f");
-                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                        DrawSliderFloat(ConfigManager.FlyAcceleration, "##fly_acceleration", 10f, 300f, "Fly Acceleration: %.2f");
-                    }
-                }
-                ImGui.Unindent();
-                ImGui.EndChild();
-            }
-            // Inventory
-            else if (selectedTab == 2)
-            {
-                ImGui.Indent(4.0f);
-                ImGui.Dummy(new System.Numerics.Vector2(4, 2));
-
-                ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                if (ImGui.BeginTable("InventorySlots", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
-                {
-                    ImGui.TableSetupColumn("Slot 1");
-                    ImGui.TableSetupColumn("Slot 2");
-                    ImGui.TableSetupColumn("Slot 3");
-                    ImGui.TableHeadersRow();
-
-                    ImGui.TableNextRow();
-
-                    for (int slot = 0; slot < 3; slot++)
-                    {
-                        ImGui.TableSetColumnIndex(slot);
-                        ImGui.PushID(slot);
-
-                        string currentItemName = "None";
-
-                        if (Player.localPlayer != null &&
-                            Player.localPlayer.itemSlots != null &&
-                            Player.localPlayer.itemSlots.Length > slot &&
-                            Player.localPlayer.itemSlots[slot]?.prefab != null)
+                        DrawCheckbox(ConfigManager.InfiniteStamina, "Infinite Stamina", (val) =>
                         {
-                            currentItemName = Player.localPlayer.itemSlots[slot].prefab.GetName();
+                            var character = GameHelpers.GetCharacterComponent();
+                            var prop = ConstantFields.GetInfiniteStaminaProperty();
+                            if (character != null && prop != null)
+                                prop.SetValue(character, val);
+                        });
+                        ImGui.SameLine();
+                        DrawToolTip("Prevents stamina from decreasing, allowing unlimited sprinting and actions.");
+
+                        DrawCheckbox(ConfigManager.LockStatus, "Freeze Afflictions", (val) =>
+                        {
+                            var character = GameHelpers.GetCharacterComponent();
+                            var prop = ConstantFields.GetStatusLockProperty();
+                            if (character != null && prop != null)
+                                prop.SetValue(character, val);
+                        });
+                        ImGui.SameLine();
+                        DrawToolTip("Prevents your statuses from changing.");
+
+                        DrawCheckbox(ConfigManager.NoWeight, "No Weight");
+                        ImGui.SameLine();
+                        DrawToolTip("Disables weight penalties from carried items and backpack.");
+
+                        DrawCheckbox(ConfigManager.SpeedMod, "Change Speed", (val) =>
+                        {
+                            var movement = GameHelpers.GetMovementComponent();
+                            var field = ConstantFields.GetMovementModifierField();
+                            if (movement != null && field != null)
+                                field.SetValue(movement, ConfigManager.SpeedAmount.Value);
+                        });
+                        ImGui.SameLine();
+                        DrawToolTip("Overrides your character's movement speed with a custom multiplier.");
+
+                        DrawCheckbox(ConfigManager.JumpMod, "Change Jump", (val) =>
+                        {
+                            var movement = GameHelpers.GetMovementComponent();
+                            var jumpField = ConstantFields.GetJumpGravityField();
+                            var fallField = ConstantFields.GetFallDamageTimeField();
+                            if (movement != null && jumpField != null)
+                                jumpField.SetValue(movement, ConfigManager.JumpAmount.Value);
+                            if (movement != null && fallField != null)
+                                fallField.SetValue(movement, ConfigManager.NoFallDmg.Value ? 999f : 1.5f);
+                        });
+                        ImGui.SameLine();
+                        DrawToolTip("Modifies jump height, allowing higher or lower jumps depending on your settings.");
+
+                        DrawCheckbox(ConfigManager.ClimbMod, "Change Climb", (val) =>
+                        {
+                            var climb = GameHelpers.GetClimbingComponent();
+                            var field = ConstantFields.GetClimbSpeedModField();
+                            if (climb != null && field != null)
+                                field.SetValue(climb, ConfigManager.ClimbAmount.Value);
+                        });
+                        ImGui.SameLine();
+                        DrawToolTip("Adjusts the speed at which you climb ladders and surfaces.");
+
+                        DrawCheckbox(ConfigManager.VineClimbMod, "Change Vine Climb", (val) =>
+                        {
+                            var vine = GameHelpers.GetVineClimbComponent();
+                            var field = ConstantFields.GetVineClimbSpeedModField();
+                            if (vine != null && field != null)
+                                field.SetValue(vine, ConfigManager.VineClimbAmount.Value);
+                        });
+                        ImGui.SameLine();
+                        DrawToolTip("Changes climbing speed specifically for vines.");
+
+                        DrawCheckbox(ConfigManager.RopeClimbMod, "Change Rope Climb", (val) =>
+                        {
+                            var rope = GameHelpers.GetRopeClimbComponent();
+                            var field = ConstantFields.GetRopeClimbSpeedModField();
+                            if (rope != null && field != null)
+                                field.SetValue(rope, ConfigManager.RopeClimbAmount.Value);
+                        });
+                        ImGui.SameLine();
+                        DrawToolTip("Modifies climbing speed when using ropes or rope-based obstacles.");
+
+                        DrawCheckbox(ConfigManager.TeleportToPing, "Teleport to Ping");
+                        ImGui.SameLine();
+                        DrawToolTip("Teleports your character to the pinged location on the map.");
+
+                        DrawCheckbox(ConfigManager.FlyMod, "Fly Mode", FlyPatch.SetFlying);
+                        ImGui.SameLine();
+                        DrawToolTip("Allows free movement in all directions while ignoring gravity.");
+                    }
+                    ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                    if (ImGui.CollapsingHeader("Teleport##PlayerTeleport", ImGuiTreeNodeFlags.DefaultOpen))
+                    {
+                        ImGui.InputFloat("X", ref Globals.teleportX);
+                        ImGui.InputFloat("Y", ref Globals.teleportY);
+                        ImGui.InputFloat("Z", ref Globals.teleportZ);
+
+                        if (ImGui.Button("Teleport to coords"))
+                        {
+                            Logger.LogInfo($"[Teleport] Requested to X:{Globals.teleportX} Y:{Globals.teleportY} Z:{Globals.teleportZ}");
+                            Utilities.TeleportToCoords(Globals.teleportX, Globals.teleportY, Globals.teleportZ);
+                        }
+                    }
+                    ImGui.EndChild();
+                    ImGui.Unindent();
+                    ImGui.SameLine();
+                    ImGui.BeginChild("PlayerDetailsColumn", new System.Numerics.Vector2(halfWidth - 10, 0), true);
+                    ImGui.Indent(4.0f);
+                    ImGui.Dummy(new System.Numerics.Vector2(4, 2));
+                    if (ImGui.CollapsingHeader("Details", ImGuiTreeNodeFlags.DefaultOpen))
+                    {
+                        if (ConfigManager.JumpMod.Value)
+                        {
+                            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                            DrawCheckbox(ConfigManager.NoFallDmg, "No Fall Dmg");
+                            DrawSliderFloat(ConfigManager.JumpAmount, "##jump_amt", 10.0f, 500.0f, "Jump Mult: %.2f");
                         }
 
-                        ImGui.Text($"Item {slot + 1}:");
-                        ImGui.TextWrapped(currentItemName);
-                        ImGui.Spacing();
-
-                        // Dropdown
-                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                        if (ImGui.BeginCombo($"##ItemSelect{slot}", Globals.selectedItems[slot] == -1 ? "None" : Globals.itemNames[Globals.selectedItems[slot]]))
+                        if (ConfigManager.SpeedMod.Value)
                         {
-                            for (int i = 0; i < Globals.itemNames.Count; i++)
+                            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                            DrawSliderFloat(ConfigManager.SpeedAmount, "##speed_amt", 1.0f, 20.0f, "Move Speed: %.2f");
+                        }
+
+                        if (ConfigManager.ClimbMod.Value)
+                        {
+                            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                            DrawSliderFloat(ConfigManager.ClimbAmount, "##climb_amt", 1.0f, 20.0f, "Climb Speed: %.2f");
+                        }
+
+                        if (ConfigManager.VineClimbMod.Value)
+                        {
+                            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                            DrawSliderFloat(ConfigManager.VineClimbAmount, "##vine_climb_amt", 1.0f, 20.0f, "Vine Speed: %.2f");
+                        }
+
+                        if (ConfigManager.RopeClimbMod.Value)
+                        {
+                            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                            DrawSliderFloat(ConfigManager.RopeClimbAmount, "##rope_climb_amt", 1.0f, 20.0f, "Rope Speed: %.2f");
+                        }
+                        if (ConfigManager.FlyMod.Value)
+                        {
+                            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                            DrawSliderFloat(ConfigManager.FlySpeed, "##fly_speed", 10f, 100f, "Fly Speed: %.2f");
+                            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                            DrawSliderFloat(ConfigManager.FlyAcceleration, "##fly_acceleration", 10f, 300f, "Fly Acceleration: %.2f");
+                        }
+                    }
+                    ImGui.Unindent();
+                    ImGui.EndChild();
+                }
+                // Items
+                else if (selectedTab == 2)
+                {
+                    if (Globals.itemNames.Count == 0)
+                    {
+                        Utilities.UpdateItems();
+                    }
+
+                    List<(int slot, int itemIndex)> assignQueue = new List<(int slot, int itemIndex)>();
+
+                    ImGui.Indent(4.0f);
+                    ImGui.Dummy(new System.Numerics.Vector2(4, 2));
+
+                    ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                    if (ImGui.BeginTable("InventorySlots", 3, ImGuiTableFlags.Borders | ImGuiTableFlags.RowBg))
+                    {
+                        ImGui.TableSetupColumn("Slot 1");
+                        ImGui.TableSetupColumn("Slot 2");
+                        ImGui.TableSetupColumn("Slot 3");
+                        ImGui.TableHeadersRow();
+
+                        ImGui.TableNextRow();
+
+                        for (int slot = 0; slot < 3; slot++)
+                        {
+                            ImGui.TableSetColumnIndex(slot);
+                            ImGui.PushID(slot); // Single PushID per slot
+
+                            string currentItemName = "None";
+
+                            if (Player.localPlayer?.itemSlots != null &&
+                                Player.localPlayer.itemSlots.Length > slot &&
+                                Player.localPlayer.itemSlots[slot]?.prefab != null)
                             {
-                                bool isSelected = (Globals.selectedItems[slot] == i);
-                                if (ImGui.Selectable(Globals.itemNames[i], isSelected))
+                                currentItemName = Player.localPlayer.itemSlots[slot].prefab.GetName();
+                            }
+
+                            ImGui.Text($"Item {slot + 1}:");
+                            ImGui.SameLine();
+                            ImGui.Text(currentItemName);
+                            ImGui.Spacing();
+
+                            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+
+                            // Detect if the value actually changed
+                            int selected = Globals.selectedItems[slot];
+                            if (DrawSearchableCombo($"##Combo{slot}", ref selected, Globals.itemNames, ref Globals.itemSearchBuffers[slot]))
+                            {
+                                Globals.selectedItems[slot] = selected;
+                                assignQueue.Add((slot, selected));
+                            }
+
+                            ImGui.SameLine();
+                            DrawToolTip("Search and assign any available item to this slot.");
+
+                            ImGui.Spacing();
+
+                            ConfigEntry<float> rechargeAmountConfig;
+                            switch (slot)
+                            {
+                                case 0:
+                                    rechargeAmountConfig = ConfigManager.RechargeAmountSlot1;
+                                    break;
+                                case 1:
+                                    rechargeAmountConfig = ConfigManager.RechargeAmountSlot2;
+                                    break;
+                                case 2:
+                                    rechargeAmountConfig = ConfigManager.RechargeAmountSlot3;
+                                    break;
+                                default:
+                                    rechargeAmountConfig = ConfigManager.RechargeAmountSlot1;
+                                    break;
+                            }
+
+                            ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                            DrawSliderFloat(rechargeAmountConfig, $"##recharge_mount##{slot}", 0f, 100f, "Charge: %.1f");
+
+                            if (ImGui.Button($"Recharge##{slot}"))
+                            {
+                                Utilities.RechargeInventorySlot(slot, rechargeAmountConfig.Value);
+                            }
+                            ImGui.SameLine();
+                            DrawToolTip("Set how much to recharge the item’s charges when clicking 'Recharge'.");
+
+                            ImGui.PopID(); // Pop slot ID
+                        }
+
+                        ImGui.EndTable();
+                    }
+
+                    foreach (var (slot, itemIndex) in assignQueue)
+                    {
+                        Utilities.AssignInventoryItem(slot, itemIndex);
+                    }
+
+                    ImGui.Dummy(new System.Numerics.Vector2(4, 2));
+                    if (ImGui.Button("Refresh Item List"))
+                        Utilities.UpdateItems();
+                    ImGui.SameLine();
+                    DrawToolTip("Reloads the list of available items in case something was missed or updated.");
+
+                    ImGui.Unindent();
+                }
+                // Lobby
+                else if (selectedTab == 3)
+                {
+                    float fullWidth = ImGui.GetContentRegionAvail().X;
+                    float halfWidth = fullWidth / 2f;
+
+                    if (Globals.allPlayers.Count == 0)
+                    {
+                        Utilities.RefreshPlayerList();
+                    }
+
+                    // Left: Player List
+                    ImGui.BeginChild("Lobby_PlayerList", new System.Numerics.Vector2(halfWidth, 0), true);
+                    ImGui.Indent(4.0f);
+                    ImGui.Dummy(new System.Numerics.Vector2(4, 2));
+                    if (ImGui.CollapsingHeader("Lobby Players", ImGuiTreeNodeFlags.DefaultOpen))
+                    {
+                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                        if (ImGui.BeginListBox("##PlayerList", new System.Numerics.Vector2(-1, ImGui.GetContentRegionAvail().Y - 40)))
+                        {
+                            for (int i = 0; i < Globals.playerNames.Count; i++)
+                            {
+                                bool isSelected = Globals.selectedPlayer == i;
+
+                                // Selected player custom colors
+                                if (isSelected)
                                 {
-                                    Globals.selectedItems[slot] = i;
-                                    Utilities.AssignInventoryItem(slot, i);
+                                    var selectedBg = new System.Numerics.Vector4(0.318f, 0.569f, 0.384f, 1.0f);
+                                    var selectedText = new System.Numerics.Vector4(0.1f, 0.1f, 0.1f, 1.0f);
+
+                                    ImGui.PushStyleColor(ImGuiCol.Text, selectedText);
+                                    ImGui.PushStyleColor(ImGuiCol.Header, selectedBg);
+                                    ImGui.PushStyleColor(ImGuiCol.FrameBg, selectedBg);
                                 }
 
+                                if (ImGui.Selectable($"{Globals.playerNames[i]}##{i}", isSelected))
+                                    Globals.selectedPlayer = i;
+
                                 if (isSelected)
-                                    ImGui.SetItemDefaultFocus();
+                                    ImGui.PopStyleColor(3);
                             }
-
-                            ImGui.EndCombo();
+                            ImGui.EndListBox();
                         }
-
-                        ImGui.Spacing();
-                        // Slot-specific config reference
-                        ConfigEntry<float> rechargeAmountConfig = ConfigManager.RechargeAmountSlot1;
-                        if (slot == 1) rechargeAmountConfig = ConfigManager.RechargeAmountSlot2;
-                        else if (slot == 2) rechargeAmountConfig = ConfigManager.RechargeAmountSlot3;
-
-                        // Recharge amount slider
-                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                        DrawSliderFloat(rechargeAmountConfig, $"##recharge_mount##{slot}", 0f, 100f, "Charge: %.1f");
-
-                        // Recharge button
-                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                        if (ImGui.Button($"Recharge##{slot}"))
-                        {
-                            Utilities.RechargeInventorySlot(slot, rechargeAmountConfig.Value);
-                        }
-
-                        ImGui.PopID();
                     }
 
-                    ImGui.EndTable();
-                }
+                    ImGui.Dummy(new System.Numerics.Vector2(4, 2));
+                    if (ImGui.Button("Refresh Players List"))
+                        Utilities.RefreshPlayerList();
+                    ImGui.SameLine();
+                    DrawToolTip("Manually reloads the list of players in case it didn’t update automatically.");
 
-                if (ImGui.Button("Refresh Item List"))
-                    Utilities.UpdateItems();
+                    ImGui.Unindent();
+                    ImGui.EndChild();
 
-                ImGui.Unindent();
-            }
-            // Lobby
-            else if (selectedTab == 3)
-            {
-                float fullWidth = ImGui.GetContentRegionAvail().X;
-                float halfWidth = fullWidth / 2f;
-
-                if (Globals.allPlayers.Count == 0)
-                {
-                    Utilities.RefreshPlayerList(); // Initial load
-                }
-
-                // Left: Player List
-                ImGui.BeginChild("Lobby_PlayerList", new System.Numerics.Vector2(halfWidth, 0), true);
-                ImGui.Indent(4.0f);
-                ImGui.Dummy(new System.Numerics.Vector2(4, 2));
-                if (ImGui.CollapsingHeader("Lobby Players", ImGuiTreeNodeFlags.DefaultOpen))
-                {
-                    ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                    if (ImGui.BeginListBox("##PlayerList", new System.Numerics.Vector2(-1, ImGui.GetContentRegionAvail().Y - 40)))
+                    // Right: Player Actions
+                    ImGui.SameLine();
+                    ImGui.BeginChild("Lobby_PlayerActions", new System.Numerics.Vector2(halfWidth - 10, 0), true);
+                    ImGui.Indent(4.0f);
+                    ImGui.Dummy(new System.Numerics.Vector2(0, 4));
+                    if (ImGui.CollapsingHeader("Actions", ImGuiTreeNodeFlags.DefaultOpen))
                     {
-                        for (int i = 0; i < Globals.playerNames.Count; i++)
+                        if (Globals.selectedPlayer >= 0 && Globals.selectedPlayer < Globals.allPlayers.Count)
                         {
-                            bool isSelected = Globals.selectedPlayer == i;
+                            if (ImGui.Button("Revive"))
+                                Utilities.ReviveSelectedPlayer();
 
-                            // Selected player custom colors
-                            if (isSelected)
+                            ImGui.SameLine();
+                            if (ImGui.Button("Kill"))
+                                Utilities.KillSelectedPlayer();
+
+                            if (ImGui.Button("Warp To"))
+                                Utilities.WarpToSelectedPlayer();
+
+                            ImGui.SameLine();
+                            if (ImGui.Button("Warp To Me"))
+                                Utilities.WarpSelectedPlayerToMe();
+                        }
+                        else
+                        {
+                            ImGui.Text("No player selected.");
+                        }
+                    }
+
+                    ImGui.Unindent();
+                    ImGui.EndChild();
+                }
+                // World
+                else if (selectedTab == 4)
+                {
+                    float fullWidth = ImGui.GetContentRegionAvail().X;
+                    float halfWidth = fullWidth / 2f;
+
+                    if (Globals.luggageLabels.Count == 0)
+                    {
+                        Utilities.RefreshLuggageList();
+                    }
+
+                    // Left: Luggage List
+                    ImGui.BeginChild("World_LuggageList", new System.Numerics.Vector2(halfWidth, 0), true);
+                    ImGui.Indent(4.0f);
+                    ImGui.Dummy(new System.Numerics.Vector2(4, 2));
+
+                    if (ImGui.CollapsingHeader("Containers", ImGuiTreeNodeFlags.DefaultOpen))
+                    {
+                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+                        if (ImGui.BeginListBox("##LuggageList", new System.Numerics.Vector2(-1, ImGui.GetContentRegionAvail().Y - 40)))
+                        {
+                            for (int i = 0; i < Globals.luggageLabels.Count; i++)
                             {
-                                var selectedBg = new System.Numerics.Vector4(0.318f, 0.569f, 0.384f, 1.0f);
-                                var selectedText = new System.Numerics.Vector4(0.1f, 0.1f, 0.1f, 1.0f);
+                                bool isSelected = Globals.selectedLuggageIndex == i;
 
-                                ImGui.PushStyleColor(ImGuiCol.Text, selectedText);
-                                ImGui.PushStyleColor(ImGuiCol.Header, selectedBg);
-                                ImGui.PushStyleColor(ImGuiCol.FrameBg, selectedBg);
+                                if (isSelected)
+                                {
+                                    var selectedBg = new System.Numerics.Vector4(0.318f, 0.569f, 0.384f, 1.0f);
+                                    var selectedText = new System.Numerics.Vector4(0.1f, 0.1f, 0.1f, 1.0f);
+
+                                    ImGui.PushStyleColor(ImGuiCol.Text, selectedText);
+                                    ImGui.PushStyleColor(ImGuiCol.Header, selectedBg);
+                                    ImGui.PushStyleColor(ImGuiCol.FrameBg, selectedBg);
+                                }
+
+                                if (ImGui.Selectable($"{Globals.luggageLabels[i]}##{i}", isSelected))
+                                    Globals.selectedLuggageIndex = i;
+
+                                if (isSelected)
+                                    ImGui.PopStyleColor(3);
+                            }
+                            ImGui.EndListBox();
+                        }
+                    }
+
+                    ImGui.Dummy(new System.Numerics.Vector2(4, 2));
+                    if (ImGui.Button("Refresh Luggage List"))
+                        Utilities.RefreshLuggageList();
+                    ImGui.SameLine();
+                    DrawToolTip("Reloads the list of all luggage containers currently in the world.");
+
+                    ImGui.Unindent();
+                    ImGui.EndChild();
+
+                    // Right: Luggage Actions
+                    ImGui.SameLine();
+                    ImGui.BeginChild("World_LuggageActions", new System.Numerics.Vector2(halfWidth - 10, 0), true);
+                    ImGui.Indent(4.0f);
+                    ImGui.Dummy(new System.Numerics.Vector2(0, 4));
+
+                    if (ImGui.CollapsingHeader("Actions", ImGuiTreeNodeFlags.DefaultOpen))
+                    {
+                        if (Globals.selectedLuggageIndex >= 0 && Globals.selectedLuggageIndex < Globals.luggageLabels.Count)
+                        {
+                            string label = Globals.luggageLabels[Globals.selectedLuggageIndex];
+
+                            if (ImGui.Button("Warp To Luggage"))
+                            {
+                                Logger.LogInfo($"[UI] Warp requested for index {Globals.selectedLuggageIndex} - {Globals.luggageLabels[Globals.selectedLuggageIndex]}");
+                                Vector3 luggageCoords = Globals.luggageObject[Globals.selectedLuggageIndex].Center();
+                                luggageCoords.y += 1.5f;
+
+                                Utilities.TeleportToCoords(luggageCoords.x, luggageCoords.y, luggageCoords.z);
                             }
 
-                            if (ImGui.Selectable($"{Globals.playerNames[i]}##{i}", isSelected))
-                                Globals.selectedPlayer = i;
-
-                            if (isSelected)
-                                ImGui.PopStyleColor(3);
+                            if (label.Contains("[Closed]"))
+                            {
+                                if (ImGui.Button("Open Luggage"))
+                                {
+                                    Utilities.OpenLuggage(Globals.selectedLuggageIndex);
+                                }
+                            }
                         }
-                        ImGui.EndListBox();
+                        else
+                        {
+                            ImGui.Text("No luggage selected.");
+                        }
                     }
+
+                    ImGui.Unindent();
+                    ImGui.EndChild();
                 }
-
-                ImGui.Dummy(new System.Numerics.Vector2(4, 2));
-                if (ImGui.Button("Refresh Players List"))
-                    Utilities.RefreshPlayerList();
-
-                ImGui.Unindent();
-                ImGui.EndChild();
-
-                // Right: Player Actions
-                ImGui.SameLine();
-                ImGui.BeginChild("Lobby_PlayerActions", new System.Numerics.Vector2(halfWidth - 10, 0), true);
-                ImGui.Indent(4.0f);
-                ImGui.Dummy(new System.Numerics.Vector2(0, 4));
-                if (ImGui.CollapsingHeader("Actions", ImGuiTreeNodeFlags.DefaultOpen))
+                // About
+                else if (selectedTab == 5)
                 {
-                    if (Globals.selectedPlayer >= 0 && Globals.selectedPlayer < Globals.allPlayers.Count)
-                    {
-                        if (ImGui.Button("Revive"))
-                            Utilities.ReviveSelectedPlayer();
+                    ImGui.Indent(4.0f);
+                    ImGui.Dummy(new System.Numerics.Vector2(4, 2));
 
-                        ImGui.SameLine();
-                        if (ImGui.Button("Kill"))
-                            Utilities.KillSelectedPlayer();
+                    ImGui.Text("PEAK AIO Mod");
+                    ImGui.Separator();
+                    ImGui.Text("Version: 1.0.1");
+                    ImGui.Text("Author: OniGremlin");
 
-                        if (ImGui.Button("Warp To"))
-                            Utilities.WarpToSelectedPlayer();
+                    ImGui.Spacing();
+                    ImGui.TextWrapped("PEAK AIO is a quality-of-life and utility mod designed for the game PEAK. It brings together a wide range of player enhancements, inventory tools, world manipulation, and lobby control features in one sleek ImGui-powered interface.");
 
-                        ImGui.SameLine();
-                        if (ImGui.Button("Warp To Me"))
-                            Utilities.WarpSelectedPlayerToMe();
-                    }
-                    else
-                    {
-                        ImGui.Text("No player selected.");
-                    }
+                    ImGui.Spacing();
+                    ImGui.Text("Key Features:");
+                    ImGui.BulletText("Infinite stamina and affliction immunity");
+                    ImGui.BulletText("Adjustable movement: speed, jump, and climb mods");
+                    ImGui.BulletText("Real-time inventory editing and recharge");
+                    ImGui.BulletText("Player-to-player warp, revive, and kill tools");
+                    ImGui.BulletText("Custom teleportation and ping-based movement");
+                    ImGui.BulletText("Stylized UI with tabbed interface");
+
+                    ImGui.Spacing();
+                    ImGui.Text("Special Thanks:");
+                    ImGui.BulletText("Penswer for insight, and guidance");
+                    ImGui.BulletText("BepInEx team for the modding framework");
+                    ImGui.BulletText("DearImGuiInjection for seamless UI integration");
+                    ImGui.BulletText("HarmonyX for runtime patching support");
+
+                    ImGui.Spacing();
+                    ImGui.Separator();
+                    ImGui.TextWrapped("This mod is provided as-is for educational and personal use. Not affiliated with or endorsed by the developers of PEAK. Use responsibly.");
+
+                    ImGui.Unindent();
                 }
 
-                ImGui.Unindent();
                 ImGui.EndChild();
             }
-            // About
-            else if (selectedTab == 4)
-            {
-                ImGui.Indent(4.0f);
-                ImGui.Dummy(new System.Numerics.Vector2(4, 2));
 
-                ImGui.Text("PEAK AIO Mod");
-                ImGui.Separator();
-                ImGui.Text("Version: 1.0.0");
-                ImGui.Text("Author: OniGremlin");
-
-                ImGui.Spacing();
-                ImGui.TextWrapped("PEAK AIO is a quality-of-life and utility mod designed for the game PEAK. It brings together a wide range of player enhancements, inventory tools, world manipulation, and lobby control features in one sleek ImGui-powered interface.");
-
-                ImGui.Spacing();
-                ImGui.Text("Key Features:");
-                ImGui.BulletText("Infinite stamina and affliction immunity");
-                ImGui.BulletText("Adjustable movement: speed, jump, and climb mods");
-                ImGui.BulletText("Real-time inventory editing and recharge");
-                ImGui.BulletText("Player-to-player warp, revive, and kill tools");
-                ImGui.BulletText("Custom teleportation and ping-based movement");
-                ImGui.BulletText("Stylized UI with tabbed interface");
-
-                ImGui.Spacing();
-                ImGui.Text("Special Thanks:");
-                ImGui.BulletText("Penswer for insight, and guidance");
-                ImGui.BulletText("BepInEx team for the modding framework");
-                ImGui.BulletText("DearImGuiInjection for seamless UI integration");
-                ImGui.BulletText("HarmonyX for runtime patching support");
-
-                ImGui.Spacing();
-                ImGui.Separator();
-                ImGui.TextWrapped("This mod is provided as-is for educational and personal use. Not affiliated with or endorsed by the developers of PEAK. Use responsibly.");
-
-                ImGui.Unindent();
-            }
-
-            ImGui.EndChild();
+            ImGui.End();
         }
-
-        ImGui.End();
+        catch (Exception ex)
+        {
+            ConfigManager.Logger.LogError("[UI ERROR] Exception in MyUI: " + ex);
+        }
     }
 }

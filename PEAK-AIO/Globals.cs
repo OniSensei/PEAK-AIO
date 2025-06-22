@@ -2,17 +2,23 @@
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Security.Policy;
 using System.Text;
 using System.Threading.Tasks;
 using UnityEngine;
 
 public static class Globals
 {
-    // Objects
-    public static object characterObj;
-    public static FieldInfo staminaField;
+    // Boolean
+    public static bool anyAfflictionEnabled;
 
-    public static object characterDataObj;
+    // Objects
+    public static Character character;
+    public static CharacterData characterData;
+
+    public static FieldInfo staminaField;
+    public static PropertyInfo infiniteStamProp;
+
     public static FieldInfo sinceFallSlideField;
     public static FieldInfo sinceGroundedField;
 
@@ -46,6 +52,7 @@ public static class Globals
     public static List<string> itemNames = new List<string>();
     public static int[] selectedItems = new int[] { -1, -1, -1 };
     public static string[] itemDisplayNames = new string[] { "None", "None", "None" };
+    public static string[] itemSearchBuffers = new string[3];
 
     // Player
     public static Player playerObj;
@@ -64,4 +71,7 @@ public static class Globals
     // World
     public static int selectedLuggageIndex = -1;
     public static List<string> luggageLabels = new List<string>();
+    public static List<Luggage> luggageObject = new List<Luggage>();
+    public static List<Luggage> allOpenedLuggage = new List<Luggage>();
+
 }

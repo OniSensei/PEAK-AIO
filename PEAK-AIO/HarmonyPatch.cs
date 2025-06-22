@@ -102,3 +102,29 @@ public class FlyPatch
         }
     }
 }
+
+[HarmonyPatch(typeof(Luggage), "OpenLuggageRPC")]
+public static class Luggage_OpenPatch
+{
+    [HarmonyPrefix]
+    public static void Prefix_OpenLuggageRPC(Luggage __instance)
+    {
+        if (!Globals.allOpenedLuggage.Contains(__instance))
+        {
+            Globals.allOpenedLuggage.Add(__instance);
+            Utilities.Logger.LogInfo($"[Luggage] Opened and tracked: {__instance.displayName}");
+        }
+    }
+}
+
+[HarmonyPatch(typeof(CharacterAfflictions), "UpdateWeight")]
+public class Patch_UpdateWeight
+{
+    static void Postfix(CharacterAfflictions __instance)
+    {
+        if (ConfigManager.NoWeight.Value)
+        {
+            __instance.SetStatus(CharacterAfflictions.STATUSTYPE.Weight, 0f);
+        }
+    }
+}

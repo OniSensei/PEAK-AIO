@@ -15,341 +15,10 @@ public static class Utilities
 {
     public static ManualLogSource Logger;
 
-    private static void GetCharacter()
-    {
-        try
-        {
-            Globals.characterObj = UnityEngine.Object.FindFirstObjectByType(typeof(CharacterData));
-            Globals.staminaField = Globals.characterObj.GetType().GetField("_stam",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        }
-        catch (Exception ex)
-        {
-            Logger?.LogError("[Utilities::GetCharacter] Exception: " + ex);
-        }
-    }
-
-    private static void GetCharacterData()
-    {
-        try
-        {
-            Globals.characterDataObj = UnityEngine.Object.FindFirstObjectByType(typeof(CharacterData));
-            Globals.sinceGroundedField = Globals.characterDataObj.GetType().GetField("sinceGrounded",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            Globals.sinceFallSlideField = Globals.characterDataObj.GetType().GetField("sinceFallSlide",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        }
-        catch (Exception ex)
-        {
-            Logger?.LogError("[Utilities::GetCharacterData] Exception: " + ex);
-        }
-    }
-
-    private static void GetCharacterAfflictions()
-    {
-        try
-        {
-            Globals.afflictionsObj = UnityEngine.Object.FindFirstObjectByType(typeof(CharacterAfflictions));
-            Globals.setStatusMethod = Globals.afflictionsObj.GetType().GetMethod("SetStatus",
-                BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-        }
-        catch (Exception ex)
-        {
-            Logger?.LogError("[Utilities::GetCharacterAfflictions] Exception: " + ex);
-        }
-    }
-
-    private static void GetMovementComponent()
-    {
-        try
-        {
-            Globals.movementComp = UnityEngine.Object.FindFirstObjectByType(typeof(CharacterMovement));
-            Globals.movementModifierField = Globals.movementComp.GetType().GetField("movementModifier",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            Globals.jumpGravityField = Globals.movementComp.GetType().GetField("jumpGravity",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-            Globals.fallDamageTimeField = Globals.movementComp.GetType().GetField("fallDamageTime",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        }
-        catch (Exception ex)
-        {
-            Logger?.LogError("[Utilities::GetMovementComponent] Exception: " + ex);
-        }
-    }
-
-    private static void GetCharacterClimb()
-    {
-        try
-        {
-            Globals.characterClimb = UnityEngine.Object.FindFirstObjectByType(typeof(CharacterClimbing));
-            Globals.climbSpeedModifierField = Globals.characterClimb.GetType().GetField("climbSpeedMod",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        }
-        catch (Exception ex)
-        {
-            Logger?.LogError("[Utilities::GetCharacterClimb] Exception: " + ex);
-        }
-    }
-
-    private static void GetCharacterVineClimb()
-    {
-        try
-        {
-            Globals.characterVineClimb = UnityEngine.Object.FindFirstObjectByType(typeof(CharacterVineClimbing));
-            Globals.vineClimbSpeedModifierField = Globals.characterClimb.GetType().GetField("climbSpeedMod",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        }
-        catch (Exception ex)
-        {
-            Logger?.LogError("[Utilities::GetCharacterVineClimb] Exception: " + ex);
-        }
-    }
-
-    private static void GetCharacterRopeClimb()
-    {
-        try
-        {
-            Globals.characterRopeHandling = UnityEngine.Object.FindFirstObjectByType(typeof(CharacterRopeHandling));
-            Globals.ropeClimbSpeedModifierField = Globals.characterClimb.GetType().GetField("climbSpeedMod",
-                BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-        }
-        catch (Exception ex)
-        {
-            Logger?.LogError("[Utilities::GetCharacterRopeClimb] Exception: " + ex);
-        }
-    }
-
     public static void GetPlayer()
     {
-        Globals.playerObj = Player.localPlayer;
-    }
-
-    public static void UpdateAfflictions()
-    {
-        bool anyAfflictionEnabled = ConfigManager.NoWeight.Value || ConfigManager.NoPoison.Value || ConfigManager.NoHot.Value
-            || ConfigManager.NoCold.Value || ConfigManager.NoCurse.Value || ConfigManager.NoInjury.Value || ConfigManager.NoDrowsy.Value
-            || ConfigManager.NoHunger.Value;
-
-        if (anyAfflictionEnabled)
-        {
-            GetCharacterAfflictions();
-            if (Globals.afflictionsObj != null)
-            {
-                Globals.setStatusMethod = Globals.afflictionsObj.GetType().GetMethod(
-                    "SetStatus",
-                    BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public
-                );
-
-                if (Globals.setStatusMethod != null)
-                {
-                    var enumType = Globals.setStatusMethod.GetParameters()[0].ParameterType;
-                    Globals.weightEnumValue = Enum.Parse(enumType, "Weight");
-                    Globals.poisonEnumValue = Enum.Parse(enumType, "Poison");
-                    Globals.hotEnumValue = Enum.Parse(enumType, "Hot");
-                    Globals.coldEnumValue = Enum.Parse(enumType, "Cold");
-                    Globals.curseEnumValue = Enum.Parse(enumType, "Curse");
-                    Globals.injuryEnumValue = Enum.Parse(enumType, "Injury");
-                    Globals.drowsyEnumValue = Enum.Parse(enumType, "Drowsy");
-                    Globals.hungerEnumValue = Enum.Parse(enumType, "Hunger");
-                }
-            }
-
-            if (Globals.afflictionsObj != null && Globals.setStatusMethod != null)
-            {
-                UnityMainThreadDispatcher.Enqueue(() =>
-                {
-                    if (ConfigManager.NoWeight.Value) ApplyAffliction("Weight", 0f);
-                    if (ConfigManager.NoPoison.Value) ApplyAffliction("Poison", 0f);
-                    if (ConfigManager.NoHot.Value) ApplyAffliction("Hot", 0f);
-                    if (ConfigManager.NoCold.Value) ApplyAffliction("Cold", 0f);
-                    if (ConfigManager.NoCurse.Value) ApplyAffliction("Curse", 0f);
-                    if (ConfigManager.NoInjury.Value) ApplyAffliction("Injury", 0f);
-                    if (ConfigManager.NoDrowsy.Value) ApplyAffliction("Drowsy", 0f);
-                    if (ConfigManager.NoHunger.Value) ApplyAffliction("Hunger", 0f);
-                });
-            }
-        }
-    }
-
-    public static void ApplyAffliction(string name, float value)
-    {
-        if (Globals.afflictionsObj == null || Globals.setStatusMethod == null)
-            return;
-
-        var enumType = Globals.setStatusMethod.GetParameters()[0].ParameterType;
-        var statusType = Enum.Parse(enumType, name);
-        Globals.setStatusMethod.Invoke(Globals.afflictionsObj, new object[] { statusType, value });
-    }
-
-    public static void UpdateStamina()
-    {
-        if (ConfigManager.InfiniteStamina.Value)
-        {
-            GetCharacter();
-
-            if (Globals.characterObj != null && Globals.staminaField != null)
-            {
-                UnityMainThreadDispatcher.Enqueue(() =>
-                {
-                    Globals.staminaField.SetValue(Globals.characterObj, ConfigManager.StaminaAmount.Value);
-                });
-            }
-        }
-    }
-
-    public static void UpdateCharacterSpeed()
-    {
-        GetMovementComponent();
-        if (ConfigManager.SpeedMod.Value)
-        {
-            if (Globals.movementComp != null && Globals.movementModifierField != null)
-            {
-                UnityMainThreadDispatcher.Enqueue(() =>
-                {
-                    Globals.movementModifierField.SetValue(Globals.movementComp, ConfigManager.SpeedAmount.Value);
-                });
-            }
-        }
-        else
-        {
-            if (Globals.movementComp != null && Globals.movementModifierField != null)
-            {
-                UnityMainThreadDispatcher.Enqueue(() =>
-                {
-                    Globals.movementModifierField.SetValue(Globals.movementComp, 1f);
-                });
-            }
-        }
-    }
-
-    public static void UpdateCharacterJump()
-    {
-        GetMovementComponent();
-        if (ConfigManager.JumpMod.Value)
-        {
-            if (Globals.movementComp != null && Globals.jumpGravityField != null)
-            {
-                UnityMainThreadDispatcher.Enqueue(() =>
-                {
-                    Globals.jumpGravityField.SetValue(Globals.movementComp, ConfigManager.JumpAmount.Value);
-                });
-            }
-
-            if (ConfigManager.NoFallDmg.Value)
-            {
-                if (Globals.movementComp != null && Globals.fallDamageTimeField != null)
-                {
-                    UnityMainThreadDispatcher.Enqueue(() =>
-                    {
-                        Globals.fallDamageTimeField.SetValue(Globals.movementComp, 999f);
-                    });
-                }
-            }
-            else
-            {
-                if (Globals.movementComp != null && Globals.fallDamageTimeField != null)
-                {
-                    UnityMainThreadDispatcher.Enqueue(() =>
-                    {
-                        Globals.fallDamageTimeField.SetValue(Globals.movementComp, 1.5f);
-                    });
-                }
-            }
-        }
-        else
-        {
-            if (Globals.movementComp != null && Globals.jumpGravityField != null)
-            {
-                UnityMainThreadDispatcher.Enqueue(() =>
-                {
-                    Globals.jumpGravityField.SetValue(Globals.movementComp, 10f);
-                });
-            }
-
-            ConfigManager.NoFallDmg.Value = false;
-            if (Globals.movementComp != null && Globals.fallDamageTimeField != null)
-            {
-                UnityMainThreadDispatcher.Enqueue(() =>
-                {
-                    Globals.fallDamageTimeField.SetValue(Globals.movementComp, 1.5f);
-                });
-            }
-        }
-    }
-
-    public static void UpdateCharacterClimb()
-    {
-        GetCharacterClimb();
-        if (ConfigManager.ClimbMod.Value)
-        {
-            if (Globals.characterClimb != null && Globals.climbSpeedModifierField != null)
-            {
-                UnityMainThreadDispatcher.Enqueue(() =>
-                {
-                    Globals.climbSpeedModifierField.SetValue(Globals.characterClimb, ConfigManager.ClimbAmount.Value);
-                });
-            }
-        }
-        else
-        {
-            if (Globals.characterClimb != null && Globals.climbSpeedModifierField != null)
-            {
-                UnityMainThreadDispatcher.Enqueue(() =>
-                {
-                    Globals.climbSpeedModifierField.SetValue(Globals.characterClimb, 1f);
-                });
-            }
-        }
-    }
-
-    public static void UpdateVineClimb()
-    {
-        GetCharacterVineClimb();
-        if (ConfigManager.VineClimbMod.Value)
-        {
-            if (Globals.characterVineClimb != null && Globals.vineClimbSpeedModifierField != null)
-            {
-                UnityMainThreadDispatcher.Enqueue(() =>
-                {
-                    Globals.vineClimbSpeedModifierField.SetValue(Globals.characterVineClimb, ConfigManager.VineClimbAmount.Value);
-                });
-            }
-        }
-        else
-        {
-            if (Globals.characterVineClimb != null && Globals.vineClimbSpeedModifierField != null)
-            {
-                UnityMainThreadDispatcher.Enqueue(() =>
-                {
-                    Globals.vineClimbSpeedModifierField.SetValue(Globals.characterVineClimb, 1f);
-                });
-            }
-        }
-    }
-
-    public static void UpdateRopeClimb()
-    {
-        GetCharacterRopeClimb();
-        if (ConfigManager.RopeClimbMod.Value)
-        {
-            if (Globals.characterRopeHandling != null && Globals.ropeClimbSpeedModifierField != null)
-            {
-                UnityMainThreadDispatcher.Enqueue(() =>
-                {
-                    Globals.ropeClimbSpeedModifierField.SetValue(Globals.characterRopeHandling, ConfigManager.RopeClimbAmount.Value);
-                });
-            }
-        }
-        else
-        {
-            if (Globals.characterRopeHandling != null && Globals.ropeClimbSpeedModifierField != null)
-            {
-                UnityMainThreadDispatcher.Enqueue(() =>
-                {
-                    Globals.ropeClimbSpeedModifierField.SetValue(Globals.characterRopeHandling, 1f);
-                });
-            }
-        }
+        if (Globals.playerObj == null)
+            Globals.playerObj = Player.localPlayer;
     }
 
     public static void UpdateItems()
@@ -615,27 +284,67 @@ public static class Utilities
     public static void RefreshLuggageList()
     {
         Globals.luggageLabels.Clear();
+        Globals.luggageObject.Clear();
+        Globals.selectedLuggageIndex = -1;
 
-        for (int i = 0; i < Luggage.ALL_LUGGAGE.Count; i++)
+        int openCount = 0;
+        int closedCount = 0;
+
+        var stateField = typeof(Luggage).GetField("state", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance);
+
+        foreach (var lug in Luggage.ALL_LUGGAGE)
         {
-            var lug = Luggage.ALL_LUGGAGE[i];
-            string state = "[Unknown]";
+            if (lug == null) continue;
 
-            var stateField = typeof(Luggage).GetField("state", BindingFlags.NonPublic | BindingFlags.Instance);
-            if (stateField != null)
-            {
-                var value = stateField.GetValue(lug);
-                if (value is Luggage.LuggageState s)
-                {
-                    state = s == Luggage.LuggageState.Open ? "[Open]" : "[Closed]";
-                }
-            }
+            string name = lug.displayName ?? "Unnamed";
+            string state = "[Closed]";
+            closedCount++;
 
-            Globals.luggageLabels.Add($"{state} {lug.displayName}");
+            Globals.luggageLabels.Add($"{state} {name}");
+            Globals.luggageObject.Add(lug);
         }
 
-        // Clamp selected index in case the count changed
-        Globals.selectedLuggageIndex = Mathf.Clamp(Globals.selectedLuggageIndex, 0, Globals.luggageLabels.Count - 1);
-        Logger.LogInfo($"[Luggage] Refreshed. Found {Globals.luggageLabels.Count} items.");
+        foreach (var lug in Globals.allOpenedLuggage)
+        {
+            if (lug == null || !lug.gameObject || !lug.gameObject.activeInHierarchy)
+                continue;
+
+            string name = lug.displayName ?? "Unnamed";
+            string state = "[Opened]";
+            openCount++;
+
+            Globals.luggageLabels.Add($"{state} {name}");
+            Globals.luggageObject.Add(lug);
+        }
+
+        Logger.LogInfo($"[Luggage] Refreshed. Closed: {closedCount}, Opened: {openCount}, Total: {Globals.luggageObject.Count}");
     }
+
+    public static void OpenLuggage(int index)
+    {
+        if (index < 0 || index >= Globals.luggageObject.Count)
+            return;
+
+        var luggage = Globals.luggageObject[index];
+        if (luggage == null)
+            return;
+
+        UnityMainThreadDispatcher.Enqueue(() =>
+        {
+            try
+            {
+                PhotonView view = luggage.GetComponent<PhotonView>();
+                if (view != null)
+                {
+                    view.RPC("OpenLuggageRPC", RpcTarget.All, new object[] { true });
+                    Logger.LogInfo($"[Luggage] Sent OpenLuggageRPC for: {luggage.displayName}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[Luggage] Open failed: {ex}");
+            }
+        });
+    }
+
 }

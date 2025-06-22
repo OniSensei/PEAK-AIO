@@ -19,3 +19,4 @@ C:\Users\dfaul\source\repos\PEAK-AIO\PEAK-AIO\bin\Release\PhotonUnityNetworking.
 C:\Users\dfaul\source\repos\PEAK-AIO\PEAK-AIO\bin\Release\Zorro.Core.Runtime.dll
 C:\Users\dfaul\source\repos\PEAK-AIO\PEAK-AIO\bin\Release\0Harmony.dll
 C:\Users\dfaul\source\repos\PEAK-AIO\PEAK-AIO\bin\Release\UnityEngine.PhysicsModule.dll
+C:\Users\dfaul\source\repos\PEAK-AIO\PEAK-AIO\bin\Release\UnityEngine.AnimationModule.dll
