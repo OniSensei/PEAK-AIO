@@ -61,6 +61,7 @@ public static class Globals
     public static List<Character> allPlayers = new List<Character>();
     public static List<string> playerNames = new List<string>();
     public static int selectedPlayer = -1;
+    public static bool excludeSelfFromAllActions = true;
 
     // Teleport
     public static bool teleportToPingEnabled = false;

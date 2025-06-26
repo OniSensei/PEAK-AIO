@@ -159,6 +159,52 @@ public static class Utilities
         });
     }
 
+    public static void ReviveAllPlayers()
+    {
+        UnityMainThreadDispatcher.Enqueue(() =>
+        {
+            foreach (var character in Character.AllCharacters)
+            {
+                Vector3 revivePos = character.Ghost != null ? character.Ghost.transform.position : character.Head;
+                character.photonView.RPC("RPCA_ReviveAtPosition", RpcTarget.All, new object[] {
+                revivePos + new Vector3(0f, 4f, 0f), false
+            });
+            }
+            Logger.LogInfo("[Lobby] Revive All triggered.");
+        });
+    }
+
+    public static void KillAllPlayers()
+    {
+        UnityMainThreadDispatcher.Enqueue(() =>
+        {
+            foreach (var character in Character.AllCharacters)
+            {
+                if (Globals.excludeSelfFromAllActions && character.IsLocal)
+                    continue;
+
+                Vector3 pos = character.transform.position;
+                character.photonView.RPC("RPCA_Die", RpcTarget.All, new object[] { pos });
+            }
+
+            Logger.LogInfo($"[Lobby] Kill All triggered. ExcludeSelf: {Globals.excludeSelfFromAllActions}");
+        });
+    }
+
+    public static void WarpAllPlayersToMe()
+    {
+        UnityMainThreadDispatcher.Enqueue(() =>
+        {
+            Vector3 myPos = Character.localCharacter.Head + new Vector3(0f, 4f, 0f);
+            foreach (var character in Character.AllCharacters)
+            {
+                character.photonView.RPC("WarpPlayerRPC", RpcTarget.All, new object[] { myPos, true });
+            }
+            Logger.LogInfo("[Lobby] Warp All To Me triggered.");
+        });
+    }
+
+
     public static void ReviveSelectedPlayer()
     {
         if (Globals.selectedPlayer < 0 || Globals.selectedPlayer >= Globals.allPlayers.Count)
@@ -281,43 +327,71 @@ public static class Utilities
         });
     }
 
+    public static bool hasInitializedLuggageList = false;
+
+    public static void EnsureLuggageListInitialized()
+    {
+        if (!hasInitializedLuggageList)
+        {
+            hasInitializedLuggageList = true;
+            RefreshLuggageList();
+        }
+    }
+
+
     public static void RefreshLuggageList()
     {
         Globals.luggageLabels.Clear();
         Globals.luggageObject.Clear();
         Globals.selectedLuggageIndex = -1;
 
-        int openCount = 0;
-        int closedCount = 0;
-
-        var stateField = typeof(Luggage).GetField("state", BindingFlags.NonPublic | BindingFlags.Public | BindingFlags.Instance);
+        var allLuggage = new List<(Luggage lug, float distance)>();
 
         foreach (var lug in Luggage.ALL_LUGGAGE)
         {
             if (lug == null) continue;
 
-            string name = lug.displayName ?? "Unnamed";
-            string state = "[Closed]";
-            closedCount++;
-
-            Globals.luggageLabels.Add($"{state} {name}");
-            Globals.luggageObject.Add(lug);
+            float distance = Vector3.Distance(Character.localCharacter.Head, lug.Center());
+            if (distance <= 300)
+            {
+                allLuggage.Add((lug, distance));
+            }
         }
 
-        foreach (var lug in Globals.allOpenedLuggage)
+        // Sort by distance (closest first)
+        allLuggage.Sort((a, b) => a.distance.CompareTo(b.distance));
+
+        foreach (var (lug, distance) in allLuggage)
         {
-            if (lug == null || !lug.gameObject || !lug.gameObject.activeInHierarchy)
-                continue;
-
             string name = lug.displayName ?? "Unnamed";
-            string state = "[Opened]";
-            openCount++;
-
-            Globals.luggageLabels.Add($"{state} {name}");
+            Globals.luggageLabels.Add($"{name} [{distance:F1}m]");
             Globals.luggageObject.Add(lug);
         }
 
-        Logger.LogInfo($"[Luggage] Refreshed. Closed: {closedCount}, Opened: {openCount}, Total: {Globals.luggageObject.Count}");
+        Logger.LogInfo($"[Luggage] Refreshed. Found {Globals.luggageLabels.Count} nearby.");
+    }
+
+    public static void OpenAllNearbyLuggage()
+    {
+        UnityMainThreadDispatcher.Enqueue(() =>
+        {
+            int opened = 0;
+
+            for (int i = 0; i < Globals.luggageObject.Count; i++)
+            {
+                var luggage = Globals.luggageObject[i];
+                if (luggage == null) continue;
+
+                var view = luggage.GetComponent<PhotonView>();
+                if (view != null)
+                {
+                    view.RPC("OpenLuggageRPC", RpcTarget.All, new object[] { true });
+                    opened++;
+                }
+            }
+
+            Logger.LogInfo($"[Luggage] Requested open for {opened} nearby containers.");
+        });
     }
 
     public static void OpenLuggage(int index)
@@ -347,4 +421,65 @@ public static class Utilities
         });
     }
 
+    public static void SpawnScoutmasterForPlayer(int playerIndex)
+    {
+        UnityMainThreadDispatcher.Enqueue(async () =>
+        {
+            if (!PhotonNetwork.IsMasterClient)
+            {
+                Logger.LogWarning("[Scoutmaster] Only the MasterClient can spawn the Scoutmaster.");
+                return;
+            }
+
+            if (playerIndex < 0 || playerIndex >= Character.AllCharacters.Count)
+            {
+                Logger.LogWarning("[Scoutmaster] Invalid player index.");
+                return;
+            }
+
+            Character targetCharacter = Character.AllCharacters[playerIndex];
+            Vector3 targetPos = targetCharacter.transform.position;
+            Vector3 spawnOrigin = targetPos + new Vector3(UnityEngine.Random.Range(-10f, 10f), 25f, UnityEngine.Random.Range(-10f, 10f));
+            Vector3 down = Vector3.down;
+
+            if (Physics.Raycast(spawnOrigin, down, out RaycastHit hit, 100f, ~0))
+            {
+                Vector3 spawnPoint = hit.point + Vector3.up * 1f;
+                Quaternion rotation = Quaternion.identity;
+
+                GameObject scoutObj = PhotonNetwork.InstantiateRoomObject("Character_Scoutmaster", spawnPoint, rotation, 0, null);
+                var character = scoutObj.GetComponent<Character>();
+                if (character != null)
+                    character.data.spawnPoint = character.transform;
+
+                await Task.Delay(100);
+
+                var scoutmaster = scoutObj.GetComponent<Scoutmaster>();
+                if (scoutmaster != null)
+                {
+                    try
+                    {
+                        var method = typeof(Scoutmaster).GetMethod("SetCurrentTarget", BindingFlags.Instance | BindingFlags.NonPublic);
+                        if (method != null)
+                        {
+                            method.Invoke(scoutmaster, new object[] { targetCharacter, 15f });
+                            Logger.LogInfo($"[Scoutmaster] Target set to {targetCharacter.characterName}");
+                        }
+                        else
+                        {
+                            Logger.LogWarning("[Scoutmaster] Reflection failed — method not found.");
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Logger.LogError("[Scoutmaster] Reflection error: " + ex);
+                    }
+                }
+            }
+            else
+            {
+                Logger.LogWarning("[Scoutmaster] No valid ground to spawn.");
+            }
+        });
+    }
 }

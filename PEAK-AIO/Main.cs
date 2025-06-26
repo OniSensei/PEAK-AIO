@@ -13,7 +13,7 @@ using Photon.Pun;
 using System.Collections.Generic;
 
 [BepInDependency(DearImGuiInjection.Metadata.GUID)]
-[BepInPlugin("com.onigremlin.peakaio", "PEAK AIO Mod", "1.0.1")]
+[BepInPlugin("com.onigremlin.peakaio", "PEAK AIO Mod", "1.0.2")]
 
 public class PeakMod : BaseUnityPlugin
 {
@@ -63,6 +63,8 @@ public class PeakMod : BaseUnityPlugin
         colors[(int)ImGuiCol.Header] = trailDust;
         colors[(int)ImGuiCol.HeaderHovered] = trailDust;
         colors[(int)ImGuiCol.HeaderActive] = trailDust;
+
+        colors[(int)ImGuiCol.Separator] = ropeBrown;
 
         colors[(int)ImGuiCol.ScrollbarBg] = badgeBrown;
         colors[(int)ImGuiCol.ScrollbarGrab] = sidebarGreen;
@@ -161,7 +163,7 @@ public class PeakMod : BaseUnityPlugin
             var pos = ImGui.GetItemRectMin();
             ImGui.SameLine();
             ImGui.SetCursorScreenPos(pos + new System.Numerics.Vector2(4, 2));
-            ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.18f, 0.18f, 0.18f, 1.00f)); 
+            ImGui.PushStyleColor(ImGuiCol.Text, new System.Numerics.Vector4(0.18f, 0.18f, 0.18f, 1.00f));
             ImGui.TextUnformatted("Search items...");
             ImGui.PopStyleColor();
         }
@@ -544,31 +546,44 @@ public class PeakMod : BaseUnityPlugin
                     if (ImGui.CollapsingHeader("Lobby Players", ImGuiTreeNodeFlags.DefaultOpen))
                     {
                         ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                        if (ImGui.BeginListBox("##PlayerList", new System.Numerics.Vector2(-1, ImGui.GetContentRegionAvail().Y - 40)))
+                        ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
+
+                        if (ImGui.BeginCombo("Select Player", Globals.selectedPlayer >= 0 && Globals.selectedPlayer < Globals.playerNames.Count
+                            ? Globals.playerNames[Globals.selectedPlayer]
+                            : "None"))
                         {
                             for (int i = 0; i < Globals.playerNames.Count; i++)
                             {
-                                bool isSelected = Globals.selectedPlayer == i;
-
-                                // Selected player custom colors
-                                if (isSelected)
+                                bool isSelected = (Globals.selectedPlayer == i);
+                                if (ImGui.Selectable($"{Globals.playerNames[i]}##{i}", isSelected))
                                 {
-                                    var selectedBg = new System.Numerics.Vector4(0.318f, 0.569f, 0.384f, 1.0f);
-                                    var selectedText = new System.Numerics.Vector4(0.1f, 0.1f, 0.1f, 1.0f);
-
-                                    ImGui.PushStyleColor(ImGuiCol.Text, selectedText);
-                                    ImGui.PushStyleColor(ImGuiCol.Header, selectedBg);
-                                    ImGui.PushStyleColor(ImGuiCol.FrameBg, selectedBg);
+                                    Globals.selectedPlayer = i;
                                 }
 
-                                if (ImGui.Selectable($"{Globals.playerNames[i]}##{i}", isSelected))
-                                    Globals.selectedPlayer = i;
-
                                 if (isSelected)
-                                    ImGui.PopStyleColor(3);
+                                    ImGui.SetItemDefaultFocus();
                             }
-                            ImGui.EndListBox();
+                            ImGui.EndCombo();
                         }
+                        ImGui.Dummy(new System.Numerics.Vector2(4, 4));
+                        ImGui.Separator();
+                        ImGui.Text("All Players");
+
+                        if (ImGui.Button("Revive All"))
+                            Utilities.ReviveAllPlayers();
+
+                        ImGui.SameLine();
+                        if (ImGui.Button("Kill All"))
+                        {
+                            Utilities.KillAllPlayers();
+                        }
+
+                        bool excludeSelf = Globals.excludeSelfFromAllActions;
+                        if (ImGui.Checkbox("Exclude Self from Kill All##KillAll", ref excludeSelf))
+                            Globals.excludeSelfFromAllActions = excludeSelf;
+
+                        if (ImGui.Button("Warp All To Me"))
+                            Utilities.WarpAllPlayersToMe();
                     }
 
                     ImGui.Dummy(new System.Numerics.Vector2(4, 2));
@@ -602,6 +617,17 @@ public class PeakMod : BaseUnityPlugin
                             ImGui.SameLine();
                             if (ImGui.Button("Warp To Me"))
                                 Utilities.WarpSelectedPlayerToMe();
+
+                            ImGui.Dummy(new System.Numerics.Vector2(4, 2));
+                            ImGui.Separator();
+                            ImGui.Text("Special Actions");
+
+                            if (ImGui.Button("Spawn Scoutmaster"))
+                            {
+                                Utilities.SpawnScoutmasterForPlayer(Globals.selectedPlayer);
+                            }
+                            ImGui.SameLine();
+                            DrawToolTip("Spawns a Scoutmaster near the selected player. Only works for host. Forces aggro.");
                         }
                         else
                         {
@@ -618,10 +644,7 @@ public class PeakMod : BaseUnityPlugin
                     float fullWidth = ImGui.GetContentRegionAvail().X;
                     float halfWidth = fullWidth / 2f;
 
-                    if (Globals.luggageLabels.Count == 0)
-                    {
-                        Utilities.RefreshLuggageList();
-                    }
+                    Utilities.EnsureLuggageListInitialized();
 
                     // Left: Luggage List
                     ImGui.BeginChild("World_LuggageList", new System.Numerics.Vector2(halfWidth, 0), true);
@@ -631,37 +654,54 @@ public class PeakMod : BaseUnityPlugin
                     if (ImGui.CollapsingHeader("Containers", ImGuiTreeNodeFlags.DefaultOpen))
                     {
                         ImGui.SetNextItemWidth(ImGui.GetContentRegionAvail().X - 4);
-                        if (ImGui.BeginListBox("##LuggageList", new System.Numerics.Vector2(-1, ImGui.GetContentRegionAvail().Y - 40)))
+
+                        // Always show the combo, even if the list is empty
+                        string selectedLabel = Globals.selectedLuggageIndex >= 0 && Globals.selectedLuggageIndex < Globals.luggageLabels.Count
+                            ? Globals.luggageLabels[Globals.selectedLuggageIndex]
+                            : "None";
+
+                        if (ImGui.BeginCombo("Select Container", selectedLabel))
                         {
-                            for (int i = 0; i < Globals.luggageLabels.Count; i++)
+                            if (Globals.luggageLabels.Count > 0)
                             {
-                                bool isSelected = Globals.selectedLuggageIndex == i;
-
-                                if (isSelected)
+                                for (int i = 0; i < Globals.luggageLabels.Count; i++)
                                 {
-                                    var selectedBg = new System.Numerics.Vector4(0.318f, 0.569f, 0.384f, 1.0f);
-                                    var selectedText = new System.Numerics.Vector4(0.1f, 0.1f, 0.1f, 1.0f);
+                                    bool isSelected = (Globals.selectedLuggageIndex == i);
+                                    if (ImGui.Selectable($"{Globals.luggageLabels[i]}##{i}", isSelected))
+                                    {
+                                        Globals.selectedLuggageIndex = i;
+                                    }
 
-                                    ImGui.PushStyleColor(ImGuiCol.Text, selectedText);
-                                    ImGui.PushStyleColor(ImGuiCol.Header, selectedBg);
-                                    ImGui.PushStyleColor(ImGuiCol.FrameBg, selectedBg);
+                                    if (isSelected)
+                                        ImGui.SetItemDefaultFocus();
                                 }
-
-                                if (ImGui.Selectable($"{Globals.luggageLabels[i]}##{i}", isSelected))
-                                    Globals.selectedLuggageIndex = i;
-
-                                if (isSelected)
-                                    ImGui.PopStyleColor(3);
                             }
-                            ImGui.EndListBox();
+                            else
+                            {
+                                ImGui.TextDisabled("No containers found.");
+                            }
+
+                            ImGui.EndCombo();
+                        }
+
+                        ImGui.Dummy(new System.Numerics.Vector2(4, 2));
+                        if (ImGui.Button("Refresh Luggage List"))
+                        {
+                            Utilities.hasInitializedLuggageList = false;
+                            Utilities.RefreshLuggageList();
+                        }
+                        ImGui.SameLine();
+                        DrawToolTip("Reloads the list of luggage within 300m of your position.");
+
+                        ImGui.Dummy(new System.Numerics.Vector2(4, 4));
+                        ImGui.Separator();
+                        ImGui.Text("All Nearby Containers");
+
+                        if (ImGui.Button("Open All Nearby"))
+                        {
+                            Utilities.OpenAllNearbyLuggage();
                         }
                     }
-
-                    ImGui.Dummy(new System.Numerics.Vector2(4, 2));
-                    if (ImGui.Button("Refresh Luggage List"))
-                        Utilities.RefreshLuggageList();
-                    ImGui.SameLine();
-                    DrawToolTip("Reloads the list of all luggage containers currently in the world.");
 
                     ImGui.Unindent();
                     ImGui.EndChild();
@@ -680,19 +720,16 @@ public class PeakMod : BaseUnityPlugin
 
                             if (ImGui.Button("Warp To Luggage"))
                             {
-                                Logger.LogInfo($"[UI] Warp requested for index {Globals.selectedLuggageIndex} - {Globals.luggageLabels[Globals.selectedLuggageIndex]}");
+                                Logger.LogInfo($"[UI] Warp requested for index {Globals.selectedLuggageIndex} - {label}");
                                 Vector3 luggageCoords = Globals.luggageObject[Globals.selectedLuggageIndex].Center();
                                 luggageCoords.y += 1.5f;
 
                                 Utilities.TeleportToCoords(luggageCoords.x, luggageCoords.y, luggageCoords.z);
                             }
 
-                            if (label.Contains("[Closed]"))
+                            if (ImGui.Button("Open Luggage"))
                             {
-                                if (ImGui.Button("Open Luggage"))
-                                {
-                                    Utilities.OpenLuggage(Globals.selectedLuggageIndex);
-                                }
+                                Utilities.OpenLuggage(Globals.selectedLuggageIndex);
                             }
                         }
                         else
@@ -712,7 +749,7 @@ public class PeakMod : BaseUnityPlugin
 
                     ImGui.Text("PEAK AIO Mod");
                     ImGui.Separator();
-                    ImGui.Text("Version: 1.0.1");
+                    ImGui.Text("Version: 1.0.2");
                     ImGui.Text("Author: OniGremlin");
 
                     ImGui.Spacing();
